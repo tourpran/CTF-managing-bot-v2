@@ -474,6 +474,10 @@ if BOT_DEBUG:
         log(*args)
 
 @client.event
+async def on_command(ctx):
+    log("Command:", ctx.command, "Args:", ctx.args, "KWArgs:", ctx.kwargs, "Msg:", ctx.message.content)
+
+@client.event
 async def on_command_error(ctx, error):
     orig = getattr(error, "original", None)
     log("Discord Error:", error, type(error), type(orig))
