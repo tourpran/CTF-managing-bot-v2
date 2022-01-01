@@ -230,8 +230,8 @@ async def join(ctx, *, role):
 async def deletectf(ctx, *, category: CategoryChannel):
     channels = category.channels
     for i in channels:
-        if i.name != "main":
-            await i.delete()
+        await i.delete()
+    await category.delete()
 
 @client.command(usage = 'Need ctf name. Type `-help` to see usage', aliases = ["newctf", "createctf"])
 @commands.has_guild_permissions(administrator = True)
