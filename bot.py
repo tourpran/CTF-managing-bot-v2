@@ -497,7 +497,3 @@ async def on_command_error(ctx, error):
         await error_log(ctx, "Uncaught error:", error, type(error))
 
 client.run(token)
-<<<<<<< HEAD
-=======
-
->>>>>>> c8ba4608d1cbfa8bccd692ecb98cf35ae855e1d0
