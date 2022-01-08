@@ -12,7 +12,6 @@ TODO:
 import mysql.connector
 import discord
 import requests
-import dateparser
 import datetime
 import string
 import json
@@ -26,12 +25,15 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = False
+BOT_DEBUG = True
 
 # Variable declarations
 headers = {
     'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:61.0) Gecko/20100101 Firefox/61.0',
 }
+
+# $ mkdir /usr/local/mysql
+# $ ln -s /usr/lib/ssl /usr/local/mysql/ssl
 
 pref = '+' if BOT_DEBUG else '-'
 logger = logging.getLogger(__name__)
@@ -368,7 +370,6 @@ async def all(ctx):
             log("RESULT:", x)
             if x[1] == 1:
                 x = [x[0], x[1], json.loads(x[2]), json.loads(x[3])]
-                # users = unroll_list_of_names([ctx.guild.get_member(i).name for i in x[2]])
                 users = unroll_list_of_names(get_names(ctx, x[2]))
 
                 lines.append(f"{x[3]['name']} solved by {users}")
@@ -403,13 +404,10 @@ async def over(ctx):
             for i in channels:
                 await i.set_permissions(ctx.guild.default_role, send_messages = True, read_messages = True)
         else:
-            await error_log(ctx, "Weirdly table doesn't exists")
+            await error_log(ctx, "Weirdly table doesn't exist")
     
     else:
         await error_log(ctx, "Please go to main channel.")
-
-# Extra Utilities
-IST = datetime.timedelta(hours = 5, minutes = 30)
 
 @client.command()
 async def upcoming(ctx, *args):
@@ -425,15 +423,10 @@ async def upcoming(ctx, *args):
 
     for ctf in range(len(upcoming_data)):
         ctf_title = upcoming_data[ctf]["title"]
-        ctf_start = dateparser.parse(upcoming_data[ctf]["start"])
-        ctf_end = dateparser.parse(upcoming_data[ctf]["finish"])
-        ctf_start = ctf_start + IST
-        ctf_end = ctf_end + IST
-        ctf_start = ctf_start.strftime('%a %b %d, %Y %I:%M:%S %p')
-        ctf_end = ctf_end.strftime('%a %b %d, %Y %I:%M:%S %p')
+        # https://pastebin.com/rJFE9yxq
+        ctf_start = f'<t:{int(datetime.datetime.fromisoformat(upcoming_data[ctf]["start"]).timestamp())}:F>'
+        ctf_end = f'<t:{int(datetime.datetime.fromisoformat(upcoming_data[ctf]["finish"]).timestamp())}:F>'
 
-        # (ctf_start, ctf_end) = (upcoming_data[ctf]["start"].replace("T", " ").split("+", 1)[0] + " UTC", upcoming_data[ctf]["finish"].replace("T", " ").split("+", 1)[0] + " UTC")
-        # (ctf_start, ctf_end) = (re.sub(":00 ", " ", ctf_start), re.sub(":00 ", " ", ctf_end))
         dur_dict = upcoming_data[ctf]["duration"]
         ctf_weight = float(upcoming_data[ctf]['weight'])
         (ctf_hours, ctf_days) = (str(dur_dict["hours"]), str(dur_dict["days"]))
@@ -441,10 +434,6 @@ async def upcoming(ctx, *args):
         ctf_image = upcoming_data[ctf]["logo"]
         ctf_format = upcoming_data[ctf]["format"]
         ctf_place = ["Online", "Onsite"][int(upcoming_data[ctf]["onsite"])]
-        # if ctf_place == False:
-        #     ctf_place = "Online"
-        # else:
-        #     ctf_place = "Onsite"
 
         embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16))
         if ctf_image != '':
