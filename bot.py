@@ -75,12 +75,13 @@ def log(*args):
 
     logger.error(result)
 
-def run_sql_statement(statement, *args, **kwargs):
+def run_sql_statement(statement, commit: bool = False, *args, **kwargs):
     try:
         if DEBUG_SQL:
             log("Executing SQL:", statement)
 
         mycursor.execute(statement, *args, **kwargs)
+        if commit: db.commit()
         return True
 
     except mysql.connector.Error as e:
@@ -101,30 +102,7 @@ def run_sql_statement(statement, *args, **kwargs):
         return False
 
 def run_sql_with_commit(statement, *args, **kwargs):
-    try:
-        if DEBUG_SQL:
-            log("Executing SQL:", statement)
-
-        mycursor.execute(statement, *args, **kwargs)
-        db.commit()
-        return True
-
-    except mysql.connector.Error as e:
-        log("Original exception:", e)
-        if e.errno == errorcode.ER_NO_SUCH_TABLE:
-            log("Exception: No such table")
-
-        elif e.errno == errorcode.ER_CLIENT_INTERACTION_TIMEOUT:
-            log("MYSQL Connection timed out")
-            connect_sql()
-            log("Connection established again")
-            log("Retrying last execution")
-            return run_sql_with_commit(statement, *args, **kwargs)
-
-        else:
-            log("Exception", e, "raised")
-        
-        return False
+    return run_sql_statement(statement, commit = True)
 
 def get_name(ctx, id_: int):
     ret = ctx.guild.get_member(id_)
