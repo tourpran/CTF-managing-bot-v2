@@ -25,7 +25,7 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = True
+BOT_DEBUG = False
 
 # Variable declarations
 headers = {
@@ -307,6 +307,8 @@ async def create(ctx, *, ctfname: typing.Optional[str]):
                 embed.set_thumbnail(url = ctf['logo'])
 
             await main_channel.send(embed = embed)
+        
+        await category_object.move(offset = 1, beginning = True)
 
     else:
         await ctx.send("Go to Bot Query !")
