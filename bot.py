@@ -503,7 +503,7 @@ async def upcoming(ctx, *args):
         ctf_format = ctf["format"]
         ctf_place = ["Online", "Onsite"][int(ctf["onsite"])]
 
-        embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16))
+        embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16), url = ctf["ctftime_url"])
         if ctf_image != '':
             embed.set_thumbnail(url = ctf_image)
         else:
