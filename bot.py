@@ -138,7 +138,7 @@ def normalize_name(name):
         if char not in charset:
             ret = ret.replace(char, "-")
     
-    ret = ret.strip("-")
+    ret = ret.strip("-").lower()
 
     return ret
 
@@ -151,6 +151,22 @@ def challenge_exists(chall: discord.TextChannel):
         return next(mycursor)[0] == 1
     else:
         return False
+
+def get_ranking(category: CategoryChannel):
+    run_sql_statement(f"SELECT contributors FROM `{category.id}` WHERE challenge = 1337")
+
+    ret = json.loads(next(mycursor)[0])
+    ret = {int(k):v for k, v in ret.items()}
+
+    return ret
+
+def ctftime_api_call(func: str, *args, **kwargs):
+    r = requests.get(f"https://ctftime.org/api/v1/{func}", headers = headers, params = kwargs)
+
+    try:
+        return r.json()
+    except:
+        return {}
 
 # Helper Functions
 async def error_log(ctx, *error_strings):
@@ -205,18 +221,65 @@ async def join(ctx, *, role):
     else:
         await ctx.send("```use this in joinctf channel please !```")
 
-@client.command()
+@client.command(aliases = ["delete", "del"])
 @commands.has_guild_permissions(administrator = True)
 async def deletectf(ctx, *, category: CategoryChannel):
     channels = category.channels
+
+    if table_exists(category.id):
+        run_sql_statement(f"SELECT misc FROM `{category.id}` WHERE challenge = 1337")
+        ctf_info = json.loads(next(mycursor)[0])
+
+        role = discord.utils.get(ctx.guild.roles, id = ctf_info['role'])
+
+        run_sql_with_commit(f"DROP TABLE `{category.id}`")
+        await role.delete()
+
     for i in channels:
         await i.delete()
     await category.delete()
 
 @client.command(usage = 'Need ctf name. Type `-help` to see usage', aliases = ["newctf", "createctf"])
 @commands.has_guild_permissions(administrator = True)
-async def create(ctx, *, ctfname):
+async def create(ctx, *, ctfname: typing.Optional[str]):
     if ctx.channel.name == "_bot_query":
+        reference = False
+        if ctx.message.reference:
+            orig = ctx.message.reference.resolved
+            
+            if isinstance(orig, discord.DeletedReferencedMessage):
+                await error_log(ctx, "Original message has been deleted")
+                return 0
+
+            if len(orig.embeds) == 0:
+                await error_log(ctx, "Invalid reference message")
+                return 0
+            
+            target = orig.embeds[0]
+
+            if not target.footer:
+                await error_log(ctx, "Invalid reference message")
+                return 0
+            
+            ctf = ctftime_api_call(f"events/{target.footer.text}/")
+            reference = True
+            ctfname = ctf["title"]
+
+        
+        if not ctfname:
+            await error_log(ctx, "Invalid syntax")
+            return 0
+        
+        if ctfname.isnumeric():
+            ctf = ctftime_api_call(f"events/{ctfname}/")
+            
+            if not ctf:
+                await error_log(ctx, "Invalid ctftime id")
+                return 0
+
+            reference = True
+            ctfname = ctf["title"]
+
         ctfname = normalize_name(ctfname)
         role = await ctx.guild.create_role(name = ctfname)
         category_object = await ctx.guild.create_category(ctfname)
@@ -231,9 +294,20 @@ async def create(ctx, *, ctfname):
         
         ctf_info = {"name": ctfname, "role": role.id, "main": main_channel.id, "category": category_object.id}
         
-        run_sql_with_commit(f"INSERT INTO `{category_object.id}` (challenge, solved, contributors, misc) VALUES (1337, 0, '{json.dumps([])}', '{json.dumps(ctf_info)}')")
+        run_sql_with_commit(f"INSERT INTO `{category_object.id}` (challenge, solved, contributors, misc) VALUES (1337, 0, '{json.dumps({})}', '{json.dumps(ctf_info)}')")
 
         await success_msg(ctx, f"Kill the CTF. Channel created {ctfname}")
+
+        if reference:
+            embed = discord.Embed(title = ctf["title"], url = ctf["url"], description = ctf["description"])
+            embed.add_field(name = "Weight", value = ctf['weight'], inline = True)
+            embed.add_field(name = "Starting", value = f"<t:{int(datetime.datetime.fromisoformat(ctf['start']).timestamp())}:R>")
+
+            if ctf['logo']:
+                embed.set_thumbnail(url = ctf['logo'])
+
+            await main_channel.send(embed = embed)
+
     else:
         await ctx.send("Go to Bot Query !")
 
@@ -285,6 +359,8 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], cont
     category = channel.category
     contribs = [user.id for user in contributors]
 
+    ranks = get_ranking(category)
+
     if run_sql_statement(f"SELECT solved, contributors FROM `{category.id}` WHERE challenge = {channel.id}"):
         result = next(mycursor)
         solved = bool(result[0])
@@ -294,9 +370,16 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], cont
         if solved:
             if ctx.author.id in sql_contributors:
                 if not local_contribs.issubset(sql_contributors):
+                    diff = local_contribs - sql_contributors
                     sql_contributors.update(local_contribs)
 
-                    if run_sql_with_commit(f"UPDATE `{category.id}` SET contributors = '{json.dumps(list(sql_contributors))}' WHERE challenge = {channel.id}"):
+                    for user in diff:
+                        if user in ranks:
+                            ranks[user] += 1
+                        else:
+                            ranks[user] = 1
+                    
+                    if run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337") and run_sql_with_commit(f"UPDATE `{category.id}` SET contributors = '{json.dumps(list(sql_contributors))}' WHERE challenge = {channel.id}"):
                         await success_msg(ctx, "Updated contributors list succesfully")
                     else:
                         await error_log(ctx, "Something went wrong while updating contributors list")
@@ -309,6 +392,13 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], cont
                 await error_log(ctx, "You cannot update contributors list because you're not one of them")
                 return 0
 
+    for user in contribs:
+        if user in ranks:
+            ranks[user] += 1
+        else:
+            ranks[user] = 1
+    
+    run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337")
     run_sql_with_commit(f"UPDATE `{category.id}` SET solved = '1', contributors = '{json.dumps(contribs)}' WHERE challenge = {channel.id}")
 
     await success_msg(ctx, f"Amazing Work Hacker. {channel.name} solved.")
@@ -370,6 +460,7 @@ async def over(ctx):
         if table_exists(category_object.id):
             await ctx.send("Kuddos to everyone who fought hard.")
             await all(ctx)
+            await rank(ctx)
 
             run_sql_statement(f"SELECT misc FROM `{category_object.id}` WHERE challenge = 1337")
             ctf_info = json.loads(next(mycursor)[0])
@@ -389,29 +480,26 @@ async def over(ctx):
 
 @client.command()
 async def upcoming(ctx, *args):
-    linkupcoming = "https://ctftime.org/api/v1/events/"
-
     N = 3
     if args and args[0].isdigit():
         N = int(args[0])
-
-    r = requests.get(linkupcoming, headers = headers, params = str(N))
-    upcoming_data = r.json()
+    
+    upcoming_data = ctftime_api_call("events/", {"limit": N})
     data = []
 
-    for ctf in range(len(upcoming_data)):
-        ctf_title = upcoming_data[ctf]["title"]
+    for ctf in upcoming_data:
+        ctf_title = ctf["title"]
         # https://pastebin.com/rJFE9yxq
-        ctf_start = f'<t:{int(datetime.datetime.fromisoformat(upcoming_data[ctf]["start"]).timestamp())}:F>'
-        ctf_end = f'<t:{int(datetime.datetime.fromisoformat(upcoming_data[ctf]["finish"]).timestamp())}:F>'
+        ctf_start = f'<t:{int(datetime.datetime.fromisoformat(ctf["start"]).timestamp())}:F>'
+        ctf_end = f'<t:{int(datetime.datetime.fromisoformat(ctf["finish"]).timestamp())}:F>'
 
-        dur_dict = upcoming_data[ctf]["duration"]
-        ctf_weight = float(upcoming_data[ctf]['weight'])
+        dur_dict = ctf["duration"]
+        ctf_weight = float(ctf['weight'])
         (ctf_hours, ctf_days) = (str(dur_dict["hours"]), str(dur_dict["days"]))
-        ctf_link = upcoming_data[ctf]["url"]
-        ctf_image = upcoming_data[ctf]["logo"]
-        ctf_format = upcoming_data[ctf]["format"]
-        ctf_place = ["Online", "Onsite"][int(upcoming_data[ctf]["onsite"])]
+        ctf_link = ctf["url"]
+        ctf_image = ctf["logo"]
+        ctf_format = ctf["format"]
+        ctf_place = ["Online", "Onsite"][int(ctf["onsite"])]
 
         embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16))
         if ctf_image != '':
@@ -423,10 +511,11 @@ async def upcoming(ctx, *args):
         embed.add_field(name = "Duration", value = ((ctf_days + " days, ") + ctf_hours) + " hours", inline = True)
         embed.add_field(name = "Format", value = (ctf_place + " ") + ctf_format, inline = True)
         embed.add_field(name = "Timeframe", value = (ctf_start + " -> ") + ctf_end, inline = True)
+        embed.set_footer(text = ctf["id"])
         # await ctx.channel.send(embed=embed)
         data.append([ctf_weight, embed])
     
-    data.sort(key=lambda i: i[0], reverse = True)
+    # data.sort(key=lambda i: i[0], reverse = True)
     for i in data[:N]:
         await ctx.channel.send(embed=i[1])
 
@@ -434,11 +523,25 @@ async def upcoming(ctx, *args):
 async def clean(ctx, amount = 5):
     await ctx.channel.purge(limit = amount)
 
+@client.command()
+async def rank(ctx):
+    ranks = get_ranking(ctx.channel.category)
+    ranks = dict(sorted(ranks.items(), key = lambda x: x[1], reverse = True))
+    ranks_with_names = {get_name(ctx, k): v for k,v in ranks.items()}
+
+    embed = discord.Embed(title = ":office_worker: Ranking", description = "\n".join([f"**{a}**: {b}" for a, b in ranks_with_names.items()]))
+    await ctx.send(embed = embed)
+
 if BOT_DEBUG:
     @client.command()
     async def test(ctx, *args):
         log(ctx, dir(ctx), ctx.author)
         log(*args)
+        if ctx.message.reference:
+            log(ctx.message.reference)
+
+            log(ctx.message.reference.cached_message)
+            log(ctx.message.reference.resolved)
 
 @client.event
 async def on_command(ctx):
@@ -463,6 +566,12 @@ async def on_command_error(ctx, error):
     
     elif isinstance(error, commands.errors.BotMissingPermissions):
         await error_log(ctx, f"Bot doesn't have {unroll_list_of_names(error.missing_perms)} permission(s)")
+
+    elif isinstance(error, commands.errors.CheckFailure):
+        await error_log(ctx, f"Invalid syntax for command {ctx.command}")
+    
+    elif isinstance(error, commands.errors.MissingRequiredArgument):
+        await error_log(ctx, f'Missing required argument {error.param} for {ctx.command} command')
 
     else:
         await error_log(ctx, "Uncaught error:", error, type(error))
