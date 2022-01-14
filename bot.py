@@ -25,7 +25,7 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = False
+BOT_DEBUG = True
 
 # Variable declarations
 headers = {
@@ -163,6 +163,8 @@ def get_ranking(category: CategoryChannel):
 def ctftime_api_call(func: str, *args, **kwargs):
     r = requests.get(f"https://ctftime.org/api/v1/{func}", headers = headers, params = kwargs)
 
+    log("REQ:", r.url)
+
     try:
         return r.json()
     except:
@@ -178,6 +180,34 @@ async def success_msg(ctx, *msg_strings):
     msg_string = ' '.join([x if isinstance(x, str) else str(x) for x in msg_strings ])
     log(msg_string)
     await ctx.send(embed = discord.Embed(title = "", description = msg_string, color = 0x00ff00))
+
+def create_ctf_embed(ctf: dict):
+    ctf_title = ctf["title"]
+    # https://pastebin.com/rJFE9yxq
+    ctf_start = f'<t:{int(datetime.datetime.fromisoformat(ctf["start"]).timestamp())}:F>'
+    ctf_end = f'<t:{int(datetime.datetime.fromisoformat(ctf["finish"]).timestamp())}:F>'
+
+    dur_dict = ctf["duration"]
+    ctf_weight = float(ctf['weight'])
+    (ctf_hours, ctf_days) = (str(dur_dict["hours"]), str(dur_dict["days"]))
+    ctf_link = ctf["url"]
+    ctf_image = ctf["logo"]
+    ctf_format = ctf["format"]
+    ctf_place = ["Online", "Onsite"][int(ctf["onsite"])]
+
+    embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16), url = ctf["ctftime_url"])
+    if ctf_image != '':
+        embed.set_thumbnail(url = ctf_image)
+    else:
+        embed.set_thumbnail(url = 'https://ctftime.org/static/images/ct/logo.svg')
+
+    embed.add_field(name = 'Weight', value = str(ctf_weight), inline = True)
+    embed.add_field(name = "Duration", value = ((ctf_days + " days, ") + ctf_hours) + " hours", inline = True)
+    embed.add_field(name = "Format", value = (ctf_place + " ") + ctf_format, inline = True)
+    embed.add_field(name = "Timeframe", value = (ctf_start + " -> ") + ctf_end, inline = True)
+    embed.set_footer(text = ctf["id"])
+
+    return embed
 
 @client.event
 async def on_ready():
@@ -486,39 +516,14 @@ async def upcoming(ctx, *args):
     if args and args[0].isdigit():
         N = int(args[0])
     
-    upcoming_data = ctftime_api_call("events/", {"limit": N})
+    upcoming_data = ctftime_api_call("events/", limit = N)
     data = []
 
     for ctf in upcoming_data:
-        ctf_title = ctf["title"]
-        # https://pastebin.com/rJFE9yxq
-        ctf_start = f'<t:{int(datetime.datetime.fromisoformat(ctf["start"]).timestamp())}:F>'
-        ctf_end = f'<t:{int(datetime.datetime.fromisoformat(ctf["finish"]).timestamp())}:F>'
-
-        dur_dict = ctf["duration"]
-        ctf_weight = float(ctf['weight'])
-        (ctf_hours, ctf_days) = (str(dur_dict["hours"]), str(dur_dict["days"]))
-        ctf_link = ctf["url"]
-        ctf_image = ctf["logo"]
-        ctf_format = ctf["format"]
-        ctf_place = ["Online", "Onsite"][int(ctf["onsite"])]
-
-        embed = discord.Embed(title = ctf_title, description = ctf_link, color = int("ffffff", 16), url = ctf["ctftime_url"])
-        if ctf_image != '':
-            embed.set_thumbnail(url = ctf_image)
-        else:
-            embed.set_thumbnail(url = 'https://ctftime.org/static/images/ct/logo.svg')
-
-        embed.add_field(name = 'Weight', value = str(ctf_weight), inline = True)
-        embed.add_field(name = "Duration", value = ((ctf_days + " days, ") + ctf_hours) + " hours", inline = True)
-        embed.add_field(name = "Format", value = (ctf_place + " ") + ctf_format, inline = True)
-        embed.add_field(name = "Timeframe", value = (ctf_start + " -> ") + ctf_end, inline = True)
-        embed.set_footer(text = ctf["id"])
-        # await ctx.channel.send(embed=embed)
-        data.append([ctf_weight, embed])
+        data.append([float(ctf["weight"]), create_ctf_embed(ctf)])
     
     # data.sort(key=lambda i: i[0], reverse = True)
-    for i in data[:N]:
+    for i in data:
         await ctx.channel.send(embed=i[1])
 
 @client.command()
