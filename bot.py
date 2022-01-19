@@ -18,6 +18,7 @@ import json
 import typing
 import traceback
 import logging
+import re
 
 from discord import CategoryChannel, errors
 from discord.ext import tasks, commands
@@ -58,7 +59,7 @@ def connect_sql():
         auth_plugin='mysql_native_password',
     )
 
-    mycursor = db.cursor()
+    mycursor = db.cursor(dictionary = True)
 
 # Functions - General
 def read_token():
@@ -138,25 +139,43 @@ def normalize_name(name):
         if char not in charset:
             ret = ret.replace(char, "-")
     
+    ret = re.sub('-+', '-', ret)
     ret = ret.strip("-").lower()
 
     return ret
 
 def table_exists(table_name):
     run_sql_statement(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'ctf' AND table_name = '{table_name}'")
-    return bool(next(mycursor)[0])
+    return bool(next(mycursor)['COUNT(*)'])
 
 def challenge_exists(chall: discord.TextChannel):
     if run_sql_statement(f"SELECT COUNT(*) FROM `{chall.category.id}` WHERE challenge = {chall.id}"):
-        return next(mycursor)[0] == 1
+        return next(mycursor)['COUNT(*)'] == 1
     else:
         return False
 
-def get_ranking(category: CategoryChannel):
+def user_exists(id_: int):
+    run_sql_statement(f"SELECT COUNT(*) FROM `ranking` WHERE user = '{id_}'")
+    return bool(next(mycursor)['COUNT(*)'])
+
+def fix_json_dict(dct: dict):
+    return {int(k):v for k, v in dct.items()}
+
+def get_ranking_local(category: CategoryChannel):
     run_sql_statement(f"SELECT contributors FROM `{category.id}` WHERE challenge = 1337")
 
-    ret = json.loads(next(mycursor)[0])
-    ret = {int(k):v for k, v in ret.items()}
+    ret = json.loads(next(mycursor)['contributors'])
+    ret = fix_json_dict(ret)
+
+    return ret
+
+def get_ranking_global(user: typing.Union[discord.Member, discord.User]):
+    run_sql_statement(f"SELECT points, last_update FROM `ranking` WHERE user = {user.id}")
+
+    ret = next(mycursor, -1)
+
+    if ret == -1:
+        run_sql_with_commit(f"INSERT INTO `ranking` (user) VALUES ({user.id})")
 
     return ret
 
@@ -211,6 +230,8 @@ def create_ctf_embed(ctf: dict):
 
 @client.event
 async def on_ready():
+    if not table_exists("ranking"):
+        run_sql_with_commit("CREATE TABLE `ranking` (user BIGINT UNSIGNED, points INT UNSIGNED DEFAULT 0, last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)")
     await client.change_presence(status = discord.Status.idle, activity = discord.Game(f'Listening to {pref}'))
     log("Ready")
 
@@ -258,7 +279,7 @@ async def deletectf(ctx, *, category: CategoryChannel):
 
     if table_exists(category.id):
         run_sql_statement(f"SELECT misc FROM `{category.id}` WHERE challenge = 1337")
-        ctf_info = json.loads(next(mycursor)[0])
+        ctf_info = json.loads(next(mycursor)['misc'])
 
         role = discord.utils.get(ctx.guild.roles, id = ctf_info['role'])
 
@@ -391,12 +412,12 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], cont
     category = channel.category
     contribs = [user.id for user in contributors]
 
-    ranks = get_ranking(category)
+    ranks = get_ranking_local(category)
 
     if run_sql_statement(f"SELECT solved, contributors FROM `{category.id}` WHERE challenge = {channel.id}"):
         result = next(mycursor)
-        solved = bool(result[0])
-        sql_contributors = set(json.loads(result[1]))
+        solved = bool(result['solved'])
+        sql_contributors = set(json.loads(result['contributors']))
         local_contribs = set(contribs)
 
         if solved:
@@ -468,8 +489,8 @@ async def all(ctx):
 
         for x in mycursor:
             log("RESULT:", x)
-            if x[1] == 1:
-                x = [x[0], x[1], json.loads(x[2]), json.loads(x[3])]
+            if x['solved'] == 1:
+                x = [x['challenge'], x['solved'], json.loads(x['contributors']), json.loads(x['misc'])]
                 users = unroll_list_of_names(get_names(ctx, x[2]))
 
                 lines.append(f"{x[3]['name']} solved by {users}")
@@ -494,8 +515,22 @@ async def over(ctx):
             await all(ctx)
             await rank(ctx)
 
+            run_sql_statement(f"SELECT contributors FROM `{category_object.id}` WHERE challenge != 1337")
+            all_contributions = mycursor.fetchall()
+
+            for chall_contrib in all_contributions:
+                contributions = json.loads(chall_contrib['contributors'])
+
+                for user in contributions:
+                    if user_exists(user):
+                        run_sql_statement(f"UPDATE `ranking` SET points = points + 1 WHERE user = '{user}'")
+                    else:
+                        run_sql_with_commit(f"INSERT INTO `ranking` (user, points) VALUES ({user}, 1)") # Commit to make it effective immediately
+            
+            db.commit() # Commit all changes at once
+
             run_sql_statement(f"SELECT misc FROM `{category_object.id}` WHERE challenge = 1337")
-            ctf_info = json.loads(next(mycursor)[0])
+            ctf_info = json.loads(next(mycursor)['misc'])
 
             role = discord.utils.get(ctx.guild.roles, id = ctf_info['role'])
 
@@ -532,12 +567,47 @@ async def clean(ctx, amount = 5):
 
 @client.command()
 async def rank(ctx):
-    ranks = get_ranking(ctx.channel.category)
-    ranks = dict(sorted(ranks.items(), key = lambda x: x[1], reverse = True))
-    ranks_with_names = {get_name(ctx, k): v for k,v in ranks.items()}
+    if table_exists(ctx.channel.category.id):
+        ranks = get_ranking_local(ctx.channel.category)
+        ranks = dict(sorted(ranks.items(), key = lambda x: x[1], reverse = True))
+        ranks_with_names = {get_name(ctx, k): v for k,v in ranks.items()}
 
-    embed = discord.Embed(title = ":office_worker: Ranking", description = "\n".join([f"**{a}**: {b}" for a, b in ranks_with_names.items()]))
-    await ctx.send(embed = embed)
+        embed = discord.Embed(title = ":office_worker: Ranking", description = "\n".join([f"**{a}**: {b}" for a, b in ranks_with_names.items()]))
+        await ctx.send(embed = embed)
+    
+    else:
+        user = ctx.author
+        r = get_ranking_global(user)
+
+        if r == -1:
+            await error_log(ctx, "Your entry does not exist. It has been created now.")
+        else:
+            points, last_update = r['points'], r['last_update']
+
+            emb = discord.Embed(title = user.name, colour = user.colour, timestamp = last_update)
+            emb.add_field(name = "Points", value = points, inline = True)
+            emb.set_footer(text = "Last updated:")
+            emb.set_thumbnail(url = user.avatar_url_as(format = "png"))
+
+            await ctx.send(embed = emb)
+
+@client.command()
+async def scoreboard(ctx):
+    run_sql_statement("SELECT * FROM `ranking`")
+
+    ranks = mycursor.fetchall()
+    ranks.sort(key = lambda x: x['points'], reverse = True)
+
+    lines = []
+
+    for index, details in enumerate(ranks):
+        lines.append(f"{index + 1}. {get_name(ctx, details['user'])} - **{details['points']}**")
+
+    lines[0] += " :crown:"
+
+    emb = discord.Embed(title = ":military_medal: Scoreboard", description = '\n'.join(lines))
+
+    await ctx.send(embed = emb)
 
 if BOT_DEBUG:
     @client.command()
