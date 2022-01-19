@@ -26,7 +26,7 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = True
+BOT_DEBUG = False
 
 # Variable declarations
 headers = {
@@ -251,7 +251,12 @@ addsolve/addsolv/adsol/as - adds a challenge and marks it solved [-as challname]
     Especially for @vishiwoz
 all      - shows all the solved challenges [-all]
 clean    - obviously cleans the messages [-clean amount]
-create   - create a new CTF to win [-create ctfname]
+create   - create a new CTF to win [-create [ctfname/ctftime id]]
+    You can create a new CTF by replying to `upcoming` embed or 
+    by providing a ctf name or ctf's ctftime id.
+    CTFTime ids are written in footers of `upcoming`'s embeds.
+    This requires user to have administrative rights
+
 help     - Shows this message [-help]
 over     - mark the ctf over once the ctf is over [-over]
 solved   - mark the challenge solved, it has different options
@@ -259,6 +264,12 @@ solved   - mark the challenge solved, it has different options
         -solved [@contributor, ...]
     - From anywhere else:
         -solved #chall-name [@contributor, ...]
+rank    - [-rank [@users, ... (only for non-CTF channels)]]
+    shows user's rank based on contributions in ctf challenges
+    In a CTF channel it shows that CTF's all-user ranking.
+    In a non-CTF channel it shows user's ranking in all CTFs since recorded
+
+scoreboard - shows a simple scoreboard based on ranks [-scoreboard]
 setcreds - set creds [-setcreds url login password]
 join     - join a ctf the team is playing [-join ctfname]```'''
     await ctx.send(msg)
