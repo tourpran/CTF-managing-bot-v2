@@ -573,7 +573,7 @@ async def clean(ctx, amount = 5):
     await ctx.channel.purge(limit = amount)
 
 @client.command()
-async def rank(ctx):
+async def rank(ctx, other_users: discord.ext.commands.Greedy[discord.User] = [], *args):
     if table_exists(ctx.channel.category.id):
         ranks = get_ranking_local(ctx.channel.category)
         ranks = dict(sorted(ranks.items(), key = lambda x: x[1], reverse = True))
@@ -583,20 +583,23 @@ async def rank(ctx):
         await ctx.send(embed = embed)
     
     else:
-        user = ctx.author
-        r = get_ranking_global(user)
+        if len(other_users) == 0:
+            other_users.append(ctx.author)
 
-        if r == -1:
-            await error_log(ctx, "Your entry does not exist. It has been created now.")
-        else:
-            points, last_update = r['points'], r['last_update']
+        for user in other_users:
+            r = get_ranking_global(user)
 
-            emb = discord.Embed(title = user.name, colour = user.colour, timestamp = last_update)
-            emb.add_field(name = "Points", value = points, inline = True)
-            emb.set_footer(text = "Last updated:")
-            emb.set_thumbnail(url = user.avatar_url_as(format = "png"))
+            if r == -1:
+                await error_log(ctx, "Your entry does not exist. It has been created now.")
+            else:
+                points, last_update = r['points'], r['last_update']
 
-            await ctx.send(embed = emb)
+                emb = discord.Embed(title = user.name, colour = user.colour, timestamp = last_update)
+                emb.add_field(name = "Points", value = points, inline = True)
+                emb.set_footer(text = "Last updated:")
+                emb.set_thumbnail(url = user.avatar_url_as(format = "png"))
+
+                await ctx.send(embed = emb)
 
 @client.command()
 async def scoreboard(ctx):
