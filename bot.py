@@ -158,6 +158,13 @@ def user_exists(id_: int):
     run_sql_statement(f"SELECT COUNT(*) FROM `ranking` WHERE user = '{id_}'")
     return bool(next(mycursor)['COUNT(*)'])
 
+def update_points(users: list):
+    for user in users:
+        if user_exists(user):
+            run_sql_statement(f"UPDATE `ranking` SET points = points + 1 WHERE user = '{user}'")
+        else:
+            run_sql_with_commit(f"INSERT INTO `ranking` (user, points) VALUES ({user}, 1)") # Commit to make it effective immediately
+
 def fix_json_dict(dct: dict):
     return {int(k):v for k, v in dct.items()}
 
@@ -278,6 +285,13 @@ async def deletectf(ctx, *, category: CategoryChannel):
     channels = category.channels
 
     if table_exists(category.id):
+        run_sql_statement(f"SELECT contributors FROM `{category.id}` WHERE challenge != 1337")
+        all_contributions = mycursor.fetchall()
+
+        for chall_contrib in all_contributions:
+            contributions = json.loads(chall_contrib['contributors'])
+            update_points(contributions)
+        
         run_sql_statement(f"SELECT misc FROM `{category.id}` WHERE challenge = 1337")
         ctf_info = json.loads(next(mycursor)['misc'])
 
@@ -520,14 +534,7 @@ async def over(ctx):
 
             for chall_contrib in all_contributions:
                 contributions = json.loads(chall_contrib['contributors'])
-
-                for user in contributions:
-                    if user_exists(user):
-                        run_sql_statement(f"UPDATE `ranking` SET points = points + 1 WHERE user = '{user}'")
-                    else:
-                        run_sql_with_commit(f"INSERT INTO `ranking` (user, points) VALUES ({user}, 1)") # Commit to make it effective immediately
-            
-            db.commit() # Commit all changes at once
+                update_points(contributions)
 
             run_sql_statement(f"SELECT misc FROM `{category_object.id}` WHERE challenge = 1337")
             ctf_info = json.loads(next(mycursor)['misc'])
