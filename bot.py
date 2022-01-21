@@ -9,6 +9,8 @@ TODO:
 '''
 
 # Library imports
+from lib2to3.pytree import convert
+from click import BadArgumentUsage
 import mysql.connector
 import discord
 import requests
@@ -26,7 +28,7 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = False
+BOT_DEBUG = True
 
 # Variable declarations
 headers = {
@@ -584,7 +586,8 @@ async def clean(ctx, amount = 5):
     await ctx.channel.purge(limit = amount)
 
 @client.command()
-async def rank(ctx, other_users: discord.ext.commands.Greedy[discord.User] = [], *args):
+async def rank(ctx, *args):
+    print(rank.signature)
     if table_exists(ctx.channel.category.id):
         ranks = get_ranking_local(ctx.channel.category)
         ranks = dict(sorted(ranks.items(), key = lambda x: x[1], reverse = True))
@@ -594,6 +597,15 @@ async def rank(ctx, other_users: discord.ext.commands.Greedy[discord.User] = [],
         await ctx.send(embed = embed)
     
     else:
+        converter = discord.ext.commands.UserConverter()
+        other_users = []
+
+        for user in args:
+            try:
+                other_users.append(await converter.convert(ctx, user))
+            except discord.ext.commands.BadArgument:
+                pass
+        
         if len(other_users) == 0:
             other_users.append(ctx.author)
 
@@ -643,6 +655,7 @@ if BOT_DEBUG:
 
 @client.event
 async def on_command(ctx):
+    # print("Globals:", globals())
     log("Command:", ctx.command, "Args:", ctx.args, "KWArgs:", ctx.kwargs, "Msg:", ctx.message.content)
 
 @client.event
