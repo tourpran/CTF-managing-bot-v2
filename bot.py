@@ -9,8 +9,6 @@ TODO:
 '''
 
 # Library imports
-from lib2to3.pytree import convert
-from click import BadArgumentUsage
 import mysql.connector
 import discord
 import requests
