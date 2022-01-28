@@ -4,8 +4,8 @@
 TODO:
     Add CTFd support
     - Add challenges automatically (with descriptions and files links)
+        Parse a particular page for getting CSRF Token and generate a user token for use in future. Use selenium in case of cloudflare.
     - Submit flags through bot
-    - A local CTFd postion shower of our team and points
 '''
 
 # Library imports
