@@ -412,7 +412,16 @@ async def addchall(ctx, *, challname):
         await ctx.send("Go to main channel to create challenges.")
 
 @client.command(aliases = ["solve", "sol"])
-async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], contributors: discord.ext.commands.Greedy[discord.User] = [], *args):
+async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *args):
+
+    converter = discord.ext.commands.UserConverter()
+    contributors = []
+
+    for user in args:
+        try:
+            contributors.append(await converter.convert(ctx, user))
+        except discord.ext.commands.BadArgument:
+            pass
 
     if source_channel:
         channel = source_channel
