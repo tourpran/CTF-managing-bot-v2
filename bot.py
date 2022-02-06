@@ -150,7 +150,13 @@ def table_exists(table_name):
 
 def challenge_exists(chall: discord.TextChannel):
     if run_sql_statement(f"SELECT COUNT(*) FROM `{chall.category.id}` WHERE challenge = {chall.id}"):
-        return next(mycursor)['COUNT(*)'] == 1
+        return bool(next(mycursor)['COUNT(*)'])
+    else:
+        return False
+
+def sql_challenge_exists(table_id: int, name: str) -> bool:
+    if run_sql_statement(f"SELECT * FROM `{table_id}` WHERE misc->'$.name' = '{name}' AND challenge != 1337"):
+        return mycursor.fetchall()
     else:
         return False
 
@@ -395,6 +401,12 @@ async def addchall(ctx, *, challname):
     if ctx.channel.name == 'main':
         challname = normalize_name(challname)
         category_object = ctx.channel.category
+        exists = sql_challenge_exists(category_object.id, challname)
+
+        if exists:
+            channel = client.get_channel(exists[0]['challenge'])
+            await error_log(ctx, f"That challenge already exists under {channel.mention}")
+            return 0
 
         channel = await ctx.guild.create_text_channel(challname, category = category_object, sync_permission = True)
 
@@ -461,10 +473,7 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *arg
                     sql_contributors.update(local_contribs)
 
                     for user in diff:
-                        if user in ranks:
-                            ranks[user] += 1
-                        else:
-                            ranks[user] = 1
+                        ranks[user] = ranks.get(user, 0) + 1
                     
                     if run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337") and run_sql_with_commit(f"UPDATE `{category.id}` SET contributors = '{json.dumps(list(sql_contributors))}' WHERE challenge = {channel.id}"):
                         await success_msg(ctx, "Updated contributors list succesfully")
