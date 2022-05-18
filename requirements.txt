@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 aiohttp==3.7.4.post0
+=======
+discord.py[voice]>=1.5.0
+discord.py>=1.5.0
+aiohttp>=3.6.2
+>>>>>>> cb77ea48ec94e41654a287ecb84e70a903135d3a
 async-timeout==3.0.1
 attrs==21.4.0
 certifi==2021.10.8
