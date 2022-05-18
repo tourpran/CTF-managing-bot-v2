@@ -4,6 +4,7 @@ services:
     build: .
     environment:
       SSL_CERT_DIR: /etc/ssl/certs
+      BOT_DEBUG: 1
   db:
     image: mysql
     command: --default-authentication-plugin=mysql_native_password

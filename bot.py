@@ -19,6 +19,7 @@ import typing
 import traceback
 import logging
 import re
+import os
 
 from discord import CategoryChannel, errors
 from discord.ext import tasks, commands
@@ -26,7 +27,7 @@ from mysql.connector import errorcode
 
 # Stuff for debugging
 DEBUG_SQL = True
-BOT_DEBUG = True
+BOT_DEBUG = bool(int(os.getenv("BOT_DEBUG")))
 
 # Variable declarations
 headers = {
@@ -62,7 +63,7 @@ def connect_sql():
     mycursor = db.cursor(dictionary = True)
 
 # Functions - General
-def read_token():
+def read_token() -> str:
     with open("token.txt","r") as f:
         lines = f.readlines()
         return lines[0].strip()
@@ -71,12 +72,11 @@ connect_sql()
 token = read_token()
 
 def log(*args):
-
     result = ' '.join([x if isinstance(x, str) else str(x) for x in args])
 
     logger.error(result)
 
-def run_sql_statement(statement, commit: bool = False, *args, **kwargs):
+def run_sql_statement(statement, commit: bool = False, *args, **kwargs) -> bool:
     try:
         if DEBUG_SQL:
             log("Executing SQL:", statement)
@@ -102,10 +102,10 @@ def run_sql_statement(statement, commit: bool = False, *args, **kwargs):
         
         return False
 
-def run_sql_with_commit(statement, *args, **kwargs):
-    return run_sql_statement(statement, commit = True)
+def run_sql_with_commit(statement, *args, **kwargs) -> bool:
+    return run_sql_statement(statement, commit = True, *args, **kwargs)
 
-def get_name(ctx, id_: int):
+def get_name(ctx, id_: int) -> str:
     ret = ctx.guild.get_member(id_)
 
     if not ret:
@@ -118,21 +118,21 @@ def get_name(ctx, id_: int):
 
     return ret
 
-def get_names(ctx, ids: list):
+def get_names(ctx, ids: list) -> list:
     names = []
     for _id in ids:
         names.append(get_name(ctx, _id))
 
     return names
 
-def unroll_list_of_names(contribs: list):
+def unroll_list_of_names(contribs: list) -> str:
     if len(contribs) == 1:
         return contribs[0]
     
     else:
         return ', '.join(contribs[:-1]) + " and " + contribs[-1]
 
-def normalize_name(name):
+def normalize_name(name: str) -> str:
     ret = name.replace(" ", '-')
 
     for char in name:
@@ -144,11 +144,11 @@ def normalize_name(name):
 
     return ret
 
-def table_exists(table_name):
+def table_exists(table_name) -> bool:
     run_sql_statement(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'ctf' AND table_name = '{table_name}'")
     return bool(next(mycursor)['COUNT(*)'])
 
-def challenge_exists(chall: discord.TextChannel):
+def challenge_exists(chall: discord.TextChannel) -> bool:
     if run_sql_statement(f"SELECT COUNT(*) FROM `{chall.category.id}` WHERE challenge = {chall.id}"):
         return bool(next(mycursor)['COUNT(*)'])
     else:
@@ -160,7 +160,7 @@ def sql_challenge_exists(table_id: int, name: str) -> bool:
     else:
         return False
 
-def user_exists(id_: int):
+def user_exists(id_: int) -> bool:
     run_sql_statement(f"SELECT COUNT(*) FROM `ranking` WHERE user = '{id_}'")
     return bool(next(mycursor)['COUNT(*)'])
 
@@ -171,10 +171,10 @@ def update_points(users: list):
         else:
             run_sql_with_commit(f"INSERT INTO `ranking` (user, points) VALUES ({user}, 1)") # Commit to make it effective immediately
 
-def fix_json_dict(dct: dict):
+def fix_json_dict(dct: dict) -> dict:
     return {int(k):v for k, v in dct.items()}
 
-def get_ranking_local(category: CategoryChannel):
+def get_ranking_local(category: CategoryChannel) -> dict:
     run_sql_statement(f"SELECT contributors FROM `{category.id}` WHERE challenge = 1337")
 
     ret = json.loads(next(mycursor)['contributors'])
@@ -182,7 +182,7 @@ def get_ranking_local(category: CategoryChannel):
 
     return ret
 
-def get_ranking_global(user: typing.Union[discord.Member, discord.User]):
+def get_ranking_global(user: typing.Union[discord.Member, discord.User]) -> int:
     run_sql_statement(f"SELECT points, last_update FROM `ranking` WHERE user = {user.id}")
 
     ret = next(mycursor, -1)
@@ -192,7 +192,7 @@ def get_ranking_global(user: typing.Union[discord.Member, discord.User]):
 
     return ret
 
-def ctftime_api_call(func: str, *args, **kwargs):
+def ctftime_api_call(func: str, *args, **kwargs) -> dict:
     r = requests.get(f"https://ctftime.org/api/v1/{func}", headers = headers, params = kwargs)
 
     log("REQ:", r.url)
@@ -213,7 +213,7 @@ async def success_msg(ctx, *msg_strings):
     log(msg_string)
     await ctx.send(embed = discord.Embed(title = "", description = msg_string, color = 0x00ff00))
 
-def create_ctf_embed(ctf: dict):
+def create_ctf_embed(ctf: dict) -> discord.Embed:
     ctf_title = ctf["title"]
     # https://pastebin.com/rJFE9yxq
     ctf_start = f'<t:{int(datetime.datetime.fromisoformat(ctf["start"]).timestamp())}:F>'
@@ -246,7 +246,7 @@ async def on_ready():
     if not table_exists("ranking"):
         run_sql_with_commit("CREATE TABLE `ranking` (user BIGINT UNSIGNED, points INT UNSIGNED DEFAULT 0, last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)")
     await client.change_presence(status = discord.Status.idle, activity = discord.Game(f'Listening to {pref}'))
-    log("Ready")
+    log("Ready", "DEBUG:", BOT_DEBUG)
 
 # Bot Commands
 @client.command()
@@ -319,6 +319,7 @@ async def deletectf(ctx, *, category: CategoryChannel):
 
     for i in channels:
         await i.delete()
+
     await category.delete()
 
 @client.command(usage = 'Need ctf name. Type `-help` to see usage', aliases = ["newctf", "createctf"])
@@ -365,7 +366,8 @@ async def create(ctx, *, ctfname: typing.Optional[str]):
         ctfname = normalize_name(ctfname)
         role = await ctx.guild.create_role(name = ctfname)
         category_object = await ctx.guild.create_category(ctfname)
-        main_channel = await ctx.guild.create_text_channel("main", category = category_object, sync_permission = True)
+        # main_channel = await ctx.guild.create_text_channel("main", category = category_object, sync_permission = True)
+        main_channel = await ctx.guild.create_text_channel("main", category = category_object)
 
         await category_object.set_permissions(role, read_messages = True, send_messages = True, connect = True, speak = True)
         await category_object.set_permissions(ctx.guild.default_role, read_messages = False, connect = False)
@@ -396,7 +398,7 @@ async def create(ctx, *, ctfname: typing.Optional[str]):
         await ctx.send("Go to Bot Query !")
 
 @client.command(aliases = ["add"])
-async def addchall(ctx, *, challname):
+async def addchall(ctx, *, challname) -> discord.Thread:
 
     if ctx.channel.name == 'main':
         challname = normalize_name(challname)
@@ -404,27 +406,27 @@ async def addchall(ctx, *, challname):
         exists = sql_challenge_exists(category_object.id, challname)
 
         if exists:
-            channel = client.get_channel(exists[0]['challenge'])
-            await error_log(ctx, f"That challenge already exists under {channel.mention}")
+            thread = ctx.channel.get_thread(exists[0]['challenge'])
+            await error_log(ctx, f"That challenge already exists under {thread.mention}")
             return 0
 
-        channel = await ctx.guild.create_text_channel(challname, category = category_object, sync_permission = True)
+        thread = await ctx.message.create_thread(name = challname, auto_archive_duration = 7 * 24 * 60)
 
-        await success_msg(ctx, f"New Challenge - {challname}.")
+        await success_msg(thread, f"New Challenge - {challname}.")
 
         chall_info = {"name": challname}
 
-        if not run_sql_with_commit(f"INSERT INTO `{category_object.id}` (challenge, solved, contributors, misc) VALUES ({channel.id}, 0, '{json.dumps([])}', '{json.dumps(chall_info)}')"):
+        if not run_sql_with_commit(f"INSERT INTO `{category_object.id}` (challenge, solved, contributors, misc) VALUES ({thread.id}, 0, '{json.dumps([])}', '{json.dumps(chall_info)}')"):
             if not table_exists(category_object.id):
                 await error_log(ctx, f"No table for {category_object.name} ctf.")
         
-        return channel
+        return thread
 
     else:
         await ctx.send("Go to main channel to create challenges.")
 
 @client.command(aliases = ["solve", "sol"])
-async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *args):
+async def solved(ctx, source_thread: typing.Optional[discord.Thread], *args):
 
     converter = discord.ext.commands.UserConverter()
     contributors = []
@@ -435,32 +437,32 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *arg
         except discord.ext.commands.BadArgument:
             pass
 
-    if source_channel:
-        channel = source_channel
+    if source_thread:
+        thread = source_thread
     else:
-        channel = ctx.channel
+        thread = ctx.channel
     
     if ctx.author not in contributors:
         contributors.append(ctx.author)
 
-    if channel.name == 'main':
+    if thread.name == 'main':
         await error_log(ctx, "Not Sure if main is solvable.")
         return 0
 
-    if not challenge_exists(channel):
-        if not table_exists(channel.category.id):
+    if not challenge_exists(thread):
+        if not table_exists(thread.category.id):
             await error_log(ctx, "The channel doesn't belong to an active CTF category")
             return 0
         
-        await error_log(ctx, f"No entry for {channel.name} in {channel.category.name} Table. Maybe it was added manually.")
+        await error_log(ctx, f"No entry for {thread.name} in {thread.category.name} Table. Maybe it was added manually.")
         return 0
 
-    category = channel.category
+    category = thread.category
     contribs = [user.id for user in contributors]
 
     ranks = get_ranking_local(category)
 
-    if run_sql_statement(f"SELECT solved, contributors FROM `{category.id}` WHERE challenge = {channel.id}"):
+    if run_sql_statement(f"SELECT solved, contributors FROM `{category.id}` WHERE challenge = {thread.id}"):
         result = next(mycursor)
         solved = bool(result['solved'])
         sql_contributors = set(json.loads(result['contributors']))
@@ -475,7 +477,7 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *arg
                     for user in diff:
                         ranks[user] = ranks.get(user, 0) + 1
                     
-                    if run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337") and run_sql_with_commit(f"UPDATE `{category.id}` SET contributors = '{json.dumps(list(sql_contributors))}' WHERE challenge = {channel.id}"):
+                    if run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337") and run_sql_with_commit(f"UPDATE `{category.id}` SET contributors = '{json.dumps(list(sql_contributors))}' WHERE challenge = {thread.id}"):
                         await success_msg(ctx, "Updated contributors list succesfully")
                     else:
                         await error_log(ctx, "Something went wrong while updating contributors list")
@@ -495,19 +497,21 @@ async def solved(ctx, source_channel: typing.Optional[discord.TextChannel], *arg
             ranks[user] = 1
     
     run_sql_statement(f"UPDATE `{category.id}` SET contributors = '{json.dumps(ranks)}' WHERE challenge = 1337")
-    run_sql_with_commit(f"UPDATE `{category.id}` SET solved = '1', contributors = '{json.dumps(contribs)}' WHERE challenge = {channel.id}")
+    run_sql_with_commit(f"UPDATE `{category.id}` SET solved = '1', contributors = '{json.dumps(contribs)}' WHERE challenge = {thread.id}")
 
-    await success_msg(ctx, f"Amazing Work Hacker. {channel.name} solved.")
-    await channel.edit(name=f"solved-{channel.name}")
+    name = thread.name
 
-    if ctx.channel.name != "main": await success_msg(discord.utils.get(category.text_channels, name = "main"), f"{unroll_list_of_names([x.name for x in contributors])} solved {channel.name[7:]}.")
+    await success_msg(ctx, f"Amazing Work Hacker. {name} solved.")
+    await thread.edit(name=f"solved-{name}")
+
+    if ctx.channel.name != "main": await success_msg(discord.utils.get(category.text_channels, name = "main"), f"{unroll_list_of_names([x.name for x in contributors])} solved {name}.")
 
 @client.command(aliases = ["addsolve", "adsol", "addsolv", "as"])
 async def addsolved(ctx, *, challname):
     if ctx.channel.name == "main":
-        channel = await addchall(ctx, challname = challname)
-        await solved(ctx, channel)
-        await channel.send(embed = discord.Embed(title = "", description = f"Solved by {ctx.author.name}"))
+        thread = await addchall(ctx, challname = challname)
+        await solved(ctx, thread)
+        await thread.send(embed = discord.Embed(title = "", description = f"Solved by {ctx.author.name}"))
     else:
         await error_log(ctx, "Please go to main channel")
 
@@ -550,8 +554,6 @@ async def all(ctx):
 async def over(ctx):
     if ctx.channel.name == "main":
         category_object = ctx.channel.category
-        channels = category_object.channels
-
 
         if table_exists(category_object.id):
             await ctx.send("Kuddos to everyone who fought hard.")
@@ -573,7 +575,7 @@ async def over(ctx):
             run_sql_with_commit(f"DROP TABLE `{category_object.id}`")
             await role.delete()
 
-            for i in channels:
+            for i in category_object.channels:
                 await i.set_permissions(ctx.guild.default_role, send_messages = True, read_messages = True)
         else:
             await error_log(ctx, "Weirdly table doesn't exist")
@@ -660,14 +662,12 @@ async def scoreboard(ctx):
 
 if BOT_DEBUG:
     @client.command()
-    async def test(ctx, *args):
-        log(ctx, dir(ctx), ctx.author)
-        log(*args)
-        if ctx.message.reference:
-            log(ctx.message.reference)
+    async def test(ctx: commands.Context, *args):
+        await success_msg(ctx, ctx.channel.mention)
 
-            log(ctx.message.reference.cached_message)
-            log(ctx.message.reference.resolved)
+@client.event
+async def on_thread_create(thread: discord.Thread):
+    await thread.join()
 
 @client.event
 async def on_command(ctx):
@@ -687,6 +687,8 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.errors.CommandInvokeError):
         if isinstance(orig, errors.Forbidden):
             await error_log(ctx, "Error:", orig.text)
+        else:
+            await error_log(ctx, "Command Invoke error:", orig.text)
 
     elif isinstance(error, commands.errors.MissingPermissions):
         await error_log(ctx, f"You don't have {unroll_list_of_names(error.missing_perms)} permission(s)")
