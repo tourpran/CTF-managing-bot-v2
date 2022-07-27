@@ -34,6 +34,8 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:61.0) Gecko/20100101 Firefox/61.0',
 }
 
+challenge_categories = {"web": ["web", "webexp", "www"], "rev": ["rev", "reverse", "reveng", "analysis"], "pwn": ["pwn", "pwnable", "binexp", "binary", "kernel", "heap", "stack"], "crypto": ['crypto', "cryptography"], "misc": ["misc"]}
+
 # $ mkdir /usr/local/mysql
 # $ ln -s /usr/lib/ssl /usr/local/mysql/ssl
 
@@ -144,6 +146,15 @@ def normalize_name(name: str) -> str:
 
     return ret
 
+def get_chall_category(challname: str) -> str:
+    first_part = challname.split()[0]
+
+    for category, aliases in challenge_categories.items():
+        if first_part in aliases:
+            return category
+    
+    return None
+
 def table_exists(table_name) -> bool:
     run_sql_statement(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'ctf' AND table_name = '{table_name}'")
     return bool(next(mycursor)['COUNT(*)'])
@@ -155,7 +166,7 @@ def challenge_exists(chall: discord.TextChannel) -> bool:
         return False
 
 def sql_challenge_exists(table_id: int, name: str) -> bool:
-    if run_sql_statement(f"SELECT * FROM `{table_id}` WHERE misc->'$.name' = '{name}' AND challenge != 1337"):
+    if run_sql_statement(f"SELECT * FROM `{table_id}` WHERE JSON_EXTRACT(misc,'$.name') = '{name}' AND challenge != 1337"):
         return mycursor.fetchall()
     else:
         return False
@@ -252,9 +263,11 @@ async def on_ready():
 @client.command()
 async def help(ctx):
     msg = '''**COMMANDS:**```
-addchall - adds the challenge you name [-addchall challname]
-addsolve/addsolv/adsol/as - adds a challenge and marks it solved [-as challname]
+addchall - adds the challenge you name with an optional category [-addchall [category] challname]
+addsolve/addsolv/adsol/as - adds a challenge and marks it solved [-as [category] challname]
     Especially for @vishiwoz
+    category can be pwn/rev/crypto/misc/web
+
 all      - shows all the solved challenges [-all]
 clean    - obviously cleans the messages [-clean amount]
 create   - create a new CTF to win [-create [ctfname/ctftime id]]
@@ -358,15 +371,14 @@ async def create(ctx, *, ctfname: typing.Optional[str]):
             
             if not ctf:
                 await error_log(ctx, "Invalid ctftime id")
-                return 0
-
-            reference = True
-            ctfname = ctf["title"]
+                reference = False
+            else:
+                reference = True
+                ctfname = ctf["title"]
 
         ctfname = normalize_name(ctfname)
         role = await ctx.guild.create_role(name = ctfname)
         category_object = await ctx.guild.create_category(ctfname)
-        # main_channel = await ctx.guild.create_text_channel("main", category = category_object, sync_permission = True)
         main_channel = await ctx.guild.create_text_channel("main", category = category_object)
 
         await category_object.set_permissions(role, read_messages = True, send_messages = True, connect = True, speak = True)
@@ -401,20 +413,26 @@ async def create(ctx, *, ctfname: typing.Optional[str]):
 async def addchall(ctx, *, challname) -> discord.Thread:
 
     if ctx.channel.name == 'main':
+        chall_category = get_chall_category(challname)
+
+        if chall_category:
+            challname = ' '.join(challname.split()[1:])
+
         challname = normalize_name(challname)
         category_object = ctx.channel.category
         exists = sql_challenge_exists(category_object.id, challname)
+        thread_name = f"{chall_category + '-' if chall_category else ''}{challname}"
 
         if exists:
             thread = ctx.channel.get_thread(exists[0]['challenge'])
             await error_log(ctx, f"That challenge already exists under {thread.mention}")
             return 0
 
-        thread = await ctx.message.create_thread(name = challname, auto_archive_duration = 7 * 24 * 60)
+        thread = await ctx.message.create_thread(name = thread_name, auto_archive_duration = 7 * 24 * 60)
 
-        await success_msg(thread, f"New Challenge - {challname}.")
+        await success_msg(thread, f"{discord.utils.get(ctx.guild.roles, name = chall_category).mention + ' ' if chall_category else ''}New Challenge - {challname}")
 
-        chall_info = {"name": challname}
+        chall_info = {"name": challname, "category": chall_category}
 
         if not run_sql_with_commit(f"INSERT INTO `{category_object.id}` (challenge, solved, contributors, misc) VALUES ({thread.id}, 0, '{json.dumps([])}', '{json.dumps(chall_info)}')"):
             if not table_exists(category_object.id):
@@ -638,7 +656,7 @@ async def rank(ctx, *args):
                 emb = discord.Embed(title = user.name, colour = user.colour, timestamp = last_update)
                 emb.add_field(name = "Points", value = points, inline = True)
                 emb.set_footer(text = "Last updated:")
-                emb.set_thumbnail(url = user.avatar_url_as(format = "png"))
+                emb.set_thumbnail(url = user.display_avatar.url)
 
                 await ctx.send(embed = emb)
 
@@ -654,7 +672,10 @@ async def scoreboard(ctx):
     for index, details in enumerate(ranks):
         lines.append(f"{index + 1}. {get_name(ctx, details['user'])} - **{details['points']}**")
 
-    lines[0] += " :crown:"
+    if len(lines) > 0:
+        lines[0] += " :crown:"
+    else:
+        lines = ["No ranking exists as of now"]
 
     emb = discord.Embed(title = ":military_medal: Scoreboard", description = '\n'.join(lines))
 
