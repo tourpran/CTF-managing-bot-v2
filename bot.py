@@ -232,7 +232,10 @@ def create_ctf_embed(ctf: dict) -> discord.Embed:
 
     dur_dict = ctf["duration"]
     ctf_weight = float(ctf['weight'])
-    (ctf_hours, ctf_days) = (str(dur_dict["hours"]), str(dur_dict["days"]))
+    ctf_hours, ctf_days = str(dur_dict["hours"]), str(dur_dict["days"])
+    ctf_hours = ctf_hours + "hours" if ctf_hours != '0' else ''
+    ctf_days = ctf_days + "days" if ctf_days != '0' else ''
+    ctf_days += ", " if ctf_days != '' and ctf_hours != '' else ''
     ctf_link = ctf["url"]
     ctf_image = ctf["logo"]
     ctf_format = ctf["format"]
@@ -245,7 +248,7 @@ def create_ctf_embed(ctf: dict) -> discord.Embed:
         embed.set_thumbnail(url = 'https://ctftime.org/static/images/ct/logo.svg')
 
     embed.add_field(name = 'Weight', value = str(ctf_weight), inline = True)
-    embed.add_field(name = "Duration", value = ((ctf_days + " days, ") + ctf_hours) + " hours", inline = True)
+    embed.add_field(name = "Duration", value = ctf_days + ctf_hours, inline = True)
     embed.add_field(name = "Format", value = (ctf_place + " ") + ctf_format, inline = True)
     embed.add_field(name = "Timeframe", value = (ctf_start + " -> ") + ctf_end, inline = True)
     embed.set_footer(text = ctf["id"])
@@ -613,7 +616,6 @@ async def upcoming(ctx, *args):
     for ctf in upcoming_data:
         data.append([float(ctf["weight"]), create_ctf_embed(ctf)])
     
-    # data.sort(key=lambda i: i[0], reverse = True)
     for i in data:
         await ctx.channel.send(embed=i[1])
 
@@ -681,10 +683,25 @@ async def scoreboard(ctx):
 
     await ctx.send(embed = emb)
 
+@client.command(aliases = ['active'])
+async def active_ctf(ctx: commands.Context, *args):
+    run_sql_statement("SHOW TABLES WHERE Tables_in_ctf != 'ranking'")
+
+    tables = [x['Tables_in_ctf'] for x in mycursor]
+    lst = []
+
+    for table_name in tables:
+        run_sql_statement(f"SELECT JSON_UNQUOTE(JSON_EXTRACT(misc, '$.name')) AS name FROM `{table_name}` WHERE challenge = 1337")
+        lst.append(next(mycursor)['name'])
+
+    await success_msg(ctx, lst)
+
+    return lst
+
 if BOT_DEBUG:
     @client.command()
     async def test(ctx: commands.Context, *args):
-        await success_msg(ctx, ctx.channel.mention)
+        await success_msg(ctx, args)
 
 @client.event
 async def on_thread_create(thread: discord.Thread):
